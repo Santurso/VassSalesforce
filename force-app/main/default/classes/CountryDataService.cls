@@ -1,55 +1,65 @@
 public class CountryDataService {
-    private static final String API_URL = 'https://api.countrylayer.com/v2/all?access_key=YOUR_ACCESS_KEY';
-
     public static void fetchAndUpdateCountryData() {
+       
+        Map<String, Country__c> existingCountries = new Map<String, Country__c>();
+        for (Country__c c : [SELECT Id, Name, Capital__c, Region__c, Alpha2Code__c, Alpha3Code__c FROM Country__c]) {
+            existingCountries.put(c.Name, c);
+        }
+
+
+        CountryLayerKey__mdt keyRecord = CountryLayerKey__mdt.getInstance('Default');
+        String apiKey = keyRecord != null ? keyRecord.AccessKey__c : null;
+        if (apiKey == null) {
+            System.debug('não há API KEY.');
+            return;
+        }
+
+  
+        String ENDPOINT = 'callout:CountryLayer/v2/all?access_key=' + apiKey;
+
         HttpRequest req = new HttpRequest();
-        req.setEndpoint(API_URL);
+        req.setEndpoint(ENDPOINT);
         req.setMethod('GET');
         Http http = new Http();
         HttpResponse res = http.send(req);
 
+        System.debug('Status Code: ' + res.getStatusCode());
+
         if (res.getStatusCode() == 200) {
+     
             Object raw = JSON.deserializeUntyped(res.getBody());
 
             if (raw instanceof List<Object>) {
                 List<Object> countryList = (List<Object>) raw;
-                List<Country__c> recordsToUpsert = new List<Country__c>();
+                List<Country__c> recordsForUpdate = new List<Country__c>();
 
                 for (Object obj : countryList) {
                     Map<String, Object> countryMap = (Map<String, Object>) obj;
+                    String name = (String) countryMap.get('name');
 
-                    // Extract regional blocs (acronyms)
-                    String regionalBlocsStr = '';
-                    if (countryMap.containsKey('regionalBlocs')) {
-                        List<Object> blocs = (List<Object>) countryMap.get('regionalBlocs');
-                        List<String> acronyms = new List<String>();
+                    Country__c record;
 
-                        for (Object bloc : blocs) {
-                            Map<String, Object> blocMap = (Map<String, Object>) bloc;
-                            if (blocMap.containsKey('acronym')) {
-                                acronyms.add((String) blocMap.get('acronym'));
-                            }
-                        }
-
-                        regionalBlocsStr = String.join(acronyms, ', ');
+                    if (existingCountries.containsKey(name)) {
+                        record = existingCountries.get(name);
+                    } else {
+                        record = new Country__c(Name = name);
                     }
 
-                    Country__c record = new Country__c(
-                        Name = (String) countryMap.get('name'),
-                        Alpha2Code__c = (String) countryMap.get('alpha2Code'),
-                        Alpha3Code__c = (String) countryMap.get('alpha3Code'),
-                        Capital__c = (String) countryMap.get('capital'),
-                        Region__c = (String) countryMap.get('region'),
-                        RegionalBlocs__c = regionalBlocsStr
-                    );
+                    record.Alpha2Code__c = (String) countryMap.get('alpha2Code');
+                    record.Alpha3Code__c = (String) countryMap.get('alpha3Code');
+                    record.Capital__c = (String) countryMap.get('capital');
+                    record.Region__c = (String) countryMap.get('region');
 
-                    recordsToUpsert.add(record);
+                    recordsForUpdate.add(record);
                 }
 
-                upsert recordsToUpsert;
+        
+                upsert recordsForUpdate Country__c.Name;
+            } else {
+                System.debug('ERRO AQUI-----------------------');
             }
         } else {
-            System.debug('Error: ' + res.getBody());
+            System.debug('HTTP ERRO AQUI------------: ' + res.getBody());
         }
     }
 }
